@@ -27,8 +27,31 @@ Use `--ready` to declare readiness after reading the initial state:
 python client/run_live.py --ready
 ```
 
-The live entry point currently displays updates and optionally declares readiness;
-it does not place trades. It waits through idle periods. Stop with Ctrl+C and
+To run the cooperative survival strategy automatically:
+
+```sh
+python client/run_live.py --automate
+```
+
+This declares readiness, waits for the administrator to start the game, and
+selects trades using a three-tick upkeep reserve. It can offer small gifts from
+surplus to planets advertising a need. Use `--advisory` instead to display
+recommendations without sending commands. See the
+[automated trading guide](docs/automated-trading.md) for policy settings,
+local tests, and limitations.
+
+Add `--interactive` to inspect the game and send manual trading commands:
+
+```sh
+python client/run_live.py --interactive
+```
+
+Type `help` for commands, `inventory` for supplies and upkeep, and `ready` to
+declare readiness. Trading waits for readiness confirmation and a running game.
+See the [manual trading guide](docs/manual-trading.md) for command syntax and
+a full local walkthrough. Observation and manual modes do not enable automation.
+
+The client waits through idle periods. Stop with Ctrl+C and
 rerun to reconnect. A new connection replaces any existing client connection
 for your station. The observatory is at https://spaceport.edneo.com.
 
@@ -73,3 +96,19 @@ this scripted runner is for servers implementing the starter exercise.
 
 See the [starter guide](artifacts/bazaar-protobuf-starter-linux/README.md)
 for protocol details and platform requirements.
+
+## Tests
+
+```sh
+python -m unittest discover -s tests -v
+python tests/check_manual_local.py
+python tests/check_automated_local.py
+```
+
+The integration check starts a temporary local practice server and tests the
+interactive connection and all 10 exchange steps through the manual controls.
+It requires Linux and local socket access; it uses temporary credentials and
+reports without contacting the live game.
+The automated check uses a separate simulated WebSocket server to exercise
+shortages, cooperation, and game phases; the supplied practice server only
+accepts its fixed 10-step script.

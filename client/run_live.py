@@ -60,7 +60,18 @@ async def observe(client, declare_ready=False):
 
 async def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--url", default=bazaar.DEFAULT_URL)
+    parser.add_argument("--url", help="override the live or practice WebSocket URL")
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument("--interactive", action="store_true", help="enable manual trading commands")
+    modes.add_argument("--automate", action="store_true", help="automatically trade for survival and cooperation")
+    modes.add_argument("--advisory", action="store_true", help="explain strategy recommendations without sending messages")
+    parser.add_argument("--reserve-ticks", type=int, default=3, help="upkeep reserve horizon (default: 3)")
+    parser.add_argument("--trade-size", type=int, default=2, help="maximum units paid per automated trade (default: 2)")
+    parser.add_argument("--gift-size", type=int, default=1, help="maximum units in an outgoing gift; 0 disables gifts")
+    parser.add_argument("--practice", action="store_true",
+                        help="use the local practice server and its P01 credentials instead of .env")
+    parser.add_argument("--credentials", type=Path,
+                        help="override the practice credentials file (requires --practice)")
     parser.add_argument("--env-file", type=Path,
                         default=Path(__file__).resolve().parents[1] / ".env")
     parser.add_argument("--ready", action="store_true",
@@ -68,15 +79,38 @@ async def main():
     parser.add_argument("-v", "--verbose", action="store_true",
                         help="display full decoded messages")
     args = parser.parse_args()
+    if args.credentials and not args.practice:
+        parser.error("--credentials requires --practice")
+    if args.automate and args.practice:
+        parser.error("The supplied practice server requires its fixed script. Use run_exercise.py or the strategy tests to validate locally.")
+    if args.advisory and args.ready:
+        parser.error("--advisory sends no messages; omit --ready")
+    from strategy import Policy
     try:
-        token = load_live_token(args.env_file)
-    except (ValueError, OSError) as exc:
+        policy = Policy(reserve_ticks=args.reserve_ticks, trade_size=args.trade_size, gift_size=args.gift_size)
+    except ValueError as exc:
+        parser.error(str(exc))
+    url = args.url or (bazaar.PRACTICE_URL if args.practice else bazaar.DEFAULT_URL)
+    try:
+        if args.practice:
+            credentials = args.credentials or Path(__file__).resolve().parents[1] / "run/validation-credentials.json"
+            token = bazaar.load_token(credentials)
+        else:
+            token = load_live_token(args.env_file)
+    except (ValueError, OSError, LookupError) as exc:
         parser.error(str(exc))
 
     print("Connecting to Bazaar. Press Ctrl+C to stop.", flush=True)
     try:
-        async with bazaar.BazaarClient(args.url, token, verbose=args.verbose) as client:
-            await observe(client, args.ready)
+        async with bazaar.BazaarClient(url, token, verbose=args.verbose) as client:
+            if args.automate or args.advisory:
+                from automated import run_automated
+                await run_automated(client, policy, advisory=args.advisory)
+            elif args.interactive:
+                from manual import interact
+                await interact(client, args.ready)
+            else:
+                await observe(client, args.ready)
     except InvalidStatus as exc:
         status = exc.response.status_code
         if status == 401:
