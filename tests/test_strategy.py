@@ -1,52 +1,48 @@
 import contextlib
 import io
 import unittest
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
-from test_manual import state_message, fill_required
+from helpers import fill_required, snapshot, ad, offer
 import bazaar
 import bazaar_pb2 as pb
 from strategy import Policy, candidates
 from automated import AutomatedSession
 
 
-def snapshot(inventory=(10, 4, 10)):
-    msg = state_message()
-    s = msg.state
-    s.self.inventory.CopyFrom(bazaar.bundle(*inventory))
-    s.self.upkeep_per_tick.CopyFrom(bazaar.bundle(1, 1, 1))
-    s.rules.new_commands_per_station_per_tick = 5
-    s.rules.max_request_records_per_station = 100
-    s.rules.max_open_outgoing_offers = 3
-    return msg
-
-
-def ad(s, selling=(pb.RESOURCE_FOOD,), seeking=(pb.RESOURCE_WATER,), peer='P02'):
-    a = s.advertisements.items.add()
-    fill_required(a)
-    a.advertisement_id = 'ad-' + peer
-    a.station_id = peer
-    a.status = pb.PUBLICATION_STATUS_ACTIVE
-    a.expires_tick = s.tick + 5
-    a.selling.items.extend(selling)
-    a.seeking.items.extend(seeking)
-    return a
-
-
-def offer(s, give=(0, 1, 0), receive=(1, 0, 0), outgoing=False, oid='offer'):
-    o = s.offers.items.add()
-    fill_required(o)
-    o.offer_id = oid
-    o.proposer_id = 'P01' if outgoing else 'P02'
-    o.recipient_id = 'P02' if outgoing else 'P01'
-    o.give.CopyFrom(bazaar.bundle(*give))
-    o.receive.CopyFrom(bazaar.bundle(*receive))
-    o.status = pb.OFFER_STATUS_OPEN
-    o.expires_tick = s.tick + 2
-    return o
-
-
 class StrategyTests(unittest.TestCase):
+    def test_offer_lifetime_is_independent_of_advertisement_lifetime(self):
+        s = snapshot().state
+        ad(s)
+        actions = candidates(s, Policy(offer_ttl=4))
+        self.assertEqual(next(a for a in actions if a.kind == 'offer').args[-1], s.tick + 4)
+        self.assertEqual(next(a for a in actions if a.kind == 'advertise').args[-1], s.tick + 2)
+        actions = candidates(s, Policy(offer_ttl=12))
+        self.assertEqual(next(a for a in actions if a.kind == 'offer').args[-1],
+                         s.tick + s.rules.max_offer_ttl_ticks)
+        self.assertEqual(candidates(s), candidates(s, Policy(offer_ttl=2)))
+        with self.assertRaises(ValueError):
+            Policy(offer_ttl=0)
+
+    def test_earlier_seeking_does_not_increase_spending_floor(self):
+        s = snapshot((10, 6, 10)).state
+        policy = Policy(imported_seek_ticks=10)
+        publication = next(a for a in candidates(s, policy) if a.kind == 'advertise')
+        self.assertIn(pb.RESOURCE_FOOD, publication.args[1])
+        self.assertNotIn(pb.RESOURCE_FOOD, publication.args[0])
+        offer(s, give=(1, 0, 0), receive=(0, 1, 0))
+        # Food can be spent down to five; seeking earlier is not a ten-unit floor.
+        self.assertTrue(any(a.kind == 'accept' for a in candidates(s, policy)))
+        s.self.inventory.food = 5
+        self.assertFalse(any(a.kind == 'accept' for a in candidates(s, policy)))
+
+    def test_default_seek_horizon_matches_existing_policy(self):
+        s = snapshot((10, 6, 10)).state
+        ad(s)
+        self.assertEqual(candidates(s), candidates(s, Policy(imported_seek_ticks=5)))
+        with self.assertRaises(ValueError):
+            Policy(imported_seek_ticks=4)
+
     def test_emergency_offer_pays_two_for_one(self):
         s = snapshot((10, 0, 10)).state
         ad(s)
@@ -211,6 +207,7 @@ class StrategyTests(unittest.TestCase):
 class ExecutionTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.client = AsyncMock()
+        self.client.record = Mock()
         self.session = AutomatedSession(self.client)
         self.msg = snapshot()
 

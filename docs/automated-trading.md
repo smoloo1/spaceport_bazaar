@@ -17,6 +17,12 @@ It loads your client token, connects to the provided live endpoint, declares
 readiness after receiving state, and waits for the game to be running before
 sending trades. It then acts without typed commands. Ctrl+C stops it.
 
+Every launch prints the path of its JSONL history in `run/logs/`. Histories
+include snapshots, sent messages, policy settings, and automated decision
+reasons, including reasons for waiting. Tokens, connection headers, and `.env`
+contents are not recorded. Run histories are ignored by Git. See the
+[game-day guide](game-day.md) for startup and post-game review.
+
 To inspect recommendations without sending readiness or trading commands:
 
 ```sh
@@ -89,6 +95,42 @@ protocol error, or disconnected socket stops the client. Reconnection currently
 requires restarting the process; pending commands are not persisted or replayed.
 
 ## Local verification
+
+For the 120-tick comparison across different starting supplies, upkeep,
+production interruptions, specialties, and peer response speeds:
+
+```sh
+python simulations/compare_p02.py
+```
+
+See [the comparison report](analysis/policy-comparison.md) for results and model
+limitations. The simulator uses the class log as scenario input; it does not
+assume that future games start with those supplies or replay classmates' choices.
+
+To isolate the effect of longer-lived offers while keeping advertisements and
+peer policies unchanged:
+
+```sh
+python simulations/compare_offer_lifetimes.py
+```
+
+See [the offer lifetime comparison](analysis/offer-lifetimes.md). The experiment
+uses target offer lifetimes of 2, 4, 6, and 12 ticks, capped by server limits.
+It does not change the live client's two-tick default.
+
+Earlier seeking is now separate from the spending reserve. To experiment with
+seeking imported resources below ten turns of supply while protecting five:
+
+```sh
+python client/run_live.py --advisory --imported-seek-ticks 10 --imported-reserve-ticks 5
+```
+
+Omitting `--imported-seek-ticks` keeps it equal to `--imported-reserve-ticks`.
+The seeking horizon cannot be smaller than the reserve horizon. The reserve
+still determines what we can afford to spend or gift; seeking sooner sets the
+replenishment target. Live defaults remain five imported-resource ticks and a
+two-unit payment cap. The comparison has not established a survival benefit
+from increasing either parameter.
 
 ```sh
 python -m unittest discover -s tests -v

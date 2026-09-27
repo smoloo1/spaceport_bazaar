@@ -17,10 +17,16 @@ class Policy:
     gift_size: int = 1
     ttl: int = 2
     emergency_ticks: int = 1
+    imported_seek_ticks: int | None = None
+    offer_ttl: int | None = None
 
     def __post_init__(self):
         if min(self.reserve_ticks, self.imported_reserve_ticks, self.trade_size, self.ttl, self.emergency_ticks) < 1 or self.gift_size < 0:
             raise ValueError('Reserve ticks, emergency ticks, trade size and TTL must be positive; gift size cannot be negative.')
+        if self.imported_seek_ticks is not None and self.imported_seek_ticks < self.imported_reserve_ticks:
+            raise ValueError('Imported seeking horizon must be at least the imported reserve horizon.')
+        if self.offer_ttl is not None and self.offer_ttl < 1:
+            raise ValueError('Offer lifetime must be positive.')
 
 
 @dataclass(frozen=True)
@@ -50,7 +56,10 @@ def candidates(s, policy=Policy()):
                          else policy.imported_reserve_ticks)
                     for resource, v in zip(RESOURCES, upkeep))
     surplus = tuple(max(0, i - r) for i, r in zip(inventory, reserve))
-    deficit = tuple(max(0, r - i) for i, r in zip(inventory, reserve))
+    target = tuple(r if resource == s.self.specialty else
+                   u * (policy.imported_seek_ticks or policy.imported_reserve_ticks)
+                   for resource, r, u in zip(RESOURCES, reserve, upkeep))
+    deficit = tuple(max(0, t - i) for i, t in zip(inventory, target))
     emergency = tuple(u > 0 and i < u * policy.emergency_ticks
                       for i, u in zip(inventory, upkeep))
     offers = [o for o in s.offers.items if o.status == pb.OFFER_STATUS_OPEN and o.expires_tick > s.tick]
@@ -99,7 +108,7 @@ def candidates(s, policy=Policy()):
     actions.extend(entry[3] for entry in incoming)
     publications = []
 
-    selling = tuple(RESOURCES[i] for i in range(3) if available[i])
+    selling = tuple(RESOURCES[i] for i in range(3) if available[i] and not deficit[i])
     seeking = tuple(RESOURCES[i] for i in needs)
     own_ads = [a for a in s.advertisements.items if a.station_id == s.self_station_id
                and a.status == pb.PUBLICATION_STATUS_ACTIVE and a.expires_tick > s.tick]
@@ -114,7 +123,7 @@ def candidates(s, policy=Policy()):
         publications.extend(Action('withdraw', (a.advertisement_id,), 'Remove an outdated surplus advertisement.',
                               ('withdraw', a.advertisement_id)) for a in own_ads)
 
-    ttl = min(policy.ttl, s.rules.max_offer_ttl_ticks, 2**64 - 1 - s.tick)
+    ttl = min(policy.offer_ttl or policy.ttl, s.rules.max_offer_ttl_ticks, 2**64 - 1 - s.tick)
     if not ttl or len(outgoing) >= s.rules.max_open_outgoing_offers:
         return actions + publications
     occupied_peers = {o.recipient_id for o in outgoing}
@@ -134,7 +143,7 @@ def candidates(s, policy=Policy()):
                 continue
             # Prefer paying with our production specialty before imported surplus.
             for give_index in sorted(range(3), key=lambda i: RESOURCES[i] != s.self.specialty):
-                if RESOURCES[give_index] not in ad.seeking.items or not available[give_index]:
+                if give_index == need or RESOURCES[give_index] not in ad.seeking.items or not available[give_index]:
                     continue
                 budget = min(policy.trade_size, available[give_index])
                 ratio = 2 if emergency[need] and budget >= 2 else 1
@@ -146,7 +155,7 @@ def candidates(s, policy=Policy()):
                                       f'{ratio}:1 exchange' + (' (emergency).' if ratio == 2 else '.'),
                                       ('offer', ad.station_id)))
     # Gifts are optional, small, and only made when all our upkeep reserves are covered.
-    if policy.gift_size and not any(deficit):
+    if policy.gift_size and all(i >= r for i, r in zip(inventory, reserve)):
         for ad in ads:
             for i in range(3):
                 if (RESOURCES[i] == s.self.specialty

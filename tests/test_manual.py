@@ -11,36 +11,7 @@ import bazaar_pb2 as pb
 from manual import ManualSession
 
 
-def fill_required(msg):
-    """Populate required proto2 fields for a valid synthetic state."""
-    for f in msg.DESCRIPTOR.fields:
-        if not f.is_required:
-            continue
-        if f.message_type:
-            child = getattr(msg, f.name)
-            child.SetInParent()
-            fill_required(child)
-        elif f.enum_type:
-            setattr(msg, f.name, f.enum_type.values[0].number)
-        else:
-            setattr(msg, f.name, f.default_value)
-
-
-def state_message():
-    msg = pb.ServerMessage()
-    fill_required(msg.state)
-    s = msg.state
-    s.run_id = 'test-run'
-    s.phase = pb.PHASE_RUNNING
-    s.self_station_id = 'P01'
-    s.self.health = 100
-    s.snapshot_sequence = 1
-    s.tick = 10
-    s.rules.max_publication_ttl_ticks = 6
-    s.rules.max_offer_ttl_ticks = 6
-    s.rules.max_command_bytes = 16384
-    s.directory.items.add(station_id='P02', display_name='Peer')
-    return msg
+from helpers import state_message
 
 
 class ManualTests(unittest.IsolatedAsyncioTestCase):
