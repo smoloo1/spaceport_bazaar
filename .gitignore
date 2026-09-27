@@ -1,0 +1,10 @@
+# Practice server output (credentials and reports)
+run/
+
+# Local client secrets
+.env
+
+# Generated from bazaar.proto by client/generate.sh
+client/bazaar_pb2.py
+
+__pycache__/

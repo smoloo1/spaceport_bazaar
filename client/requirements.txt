@@ -1,0 +1,4 @@
+websockets>=14,<16
+python-dotenv>=1,<2
+# Provides protoc for generating bazaar_pb2.py; pulls in a compatible protobuf runtime.
+grpcio-tools>=1.66,<2
