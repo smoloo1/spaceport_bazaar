@@ -32,6 +32,15 @@ it does not place trades. It waits through idle periods. Stop with Ctrl+C and
 rerun to reconnect. A new connection replaces any existing client connection
 for your station. The observatory is at https://spaceport.edneo.com.
 
+## Client API
+
+`client/api.py` defines the async game-level `Bazaar` API. Session management,
+reading/syncing state, readiness, advertisements, offers, accepting offers,
+and withdrawals are implemented. It only allows this station to give its
+specialty resource, as reported by `state.self.specialty`; advertisements also
+only list that resource as for sale. The existing `client/bazaar.py` provides
+the low-level WebSocket transport and protobuf command builders.
+
 ## Run the practice exchange
 
 Open this project in its VS Code devcontainer. The container installs Python
