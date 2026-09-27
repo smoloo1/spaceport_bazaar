@@ -12,13 +12,15 @@ NAMES = ('water', 'food', 'components')
 @dataclass(frozen=True)
 class Policy:
     reserve_ticks: int = 3
+    imported_reserve_ticks: int = 5
     trade_size: int = 2
     gift_size: int = 1
     ttl: int = 2
+    emergency_ticks: int = 1
 
     def __post_init__(self):
-        if min(self.reserve_ticks, self.trade_size, self.ttl) < 1 or self.gift_size < 0:
-            raise ValueError('Reserve ticks, trade size and TTL must be positive; gift size cannot be negative.')
+        if min(self.reserve_ticks, self.imported_reserve_ticks, self.trade_size, self.ttl, self.emergency_ticks) < 1 or self.gift_size < 0:
+            raise ValueError('Reserve ticks, emergency ticks, trade size and TTL must be positive; gift size cannot be negative.')
 
 
 @dataclass(frozen=True)
@@ -44,9 +46,13 @@ def candidates(s, policy=Policy()):
         return []
     inventory = bazaar.as_tuple(s.self.inventory)
     upkeep = bazaar.as_tuple(s.self.upkeep_per_tick)
-    reserve = tuple(v * policy.reserve_ticks for v in upkeep)
+    reserve = tuple(v * (policy.reserve_ticks if resource == s.self.specialty
+                         else policy.imported_reserve_ticks)
+                    for resource, v in zip(RESOURCES, upkeep))
     surplus = tuple(max(0, i - r) for i, r in zip(inventory, reserve))
     deficit = tuple(max(0, r - i) for i, r in zip(inventory, reserve))
+    emergency = tuple(u > 0 and i < u * policy.emergency_ticks
+                      for i, u in zip(inventory, upkeep))
     offers = [o for o in s.offers.items if o.status == pb.OFFER_STATUS_OPEN and o.expires_tick > s.tick]
     outgoing = [o for o in offers if o.proposer_id == s.self_station_id]
     committed = tuple(sum(bazaar.as_tuple(o.give)[i] for o in outgoing) for i in range(3))
@@ -72,6 +78,11 @@ def candidates(s, policy=Policy()):
         if any(p > a for p, a in zip(pay, available)) or any(v > 2**64 - 1 for v in projected):
             continue
         if not any(get) or sum(pay) > policy.trade_size:
+            continue
+        # A premium must buy urgently needed units, not merely unrelated filler.
+        urgent_gain = sum(min(deficit[i], max(0, get[i] - pay[i]))
+                          for i in range(3) if emergency[i])
+        if sum(pay) > sum(get) and sum(pay) > 2 * urgent_gain:
             continue
         improvement = tuple(min(deficit[i], max(0, get[i] - pay[i])) for i in needs)
         if not any(pay) or any(improvement):
@@ -121,20 +132,25 @@ def candidates(s, policy=Policy()):
         for ad in ads:
             if RESOURCES[need] not in ad.selling.items:
                 continue
-            for give_index in range(3):
+            # Prefer paying with our production specialty before imported surplus.
+            for give_index in sorted(range(3), key=lambda i: RESOURCES[i] != s.self.specialty):
                 if RESOURCES[give_index] not in ad.seeking.items or not available[give_index]:
                     continue
-                amount = min(policy.trade_size, available[give_index], deficit[need])
+                budget = min(policy.trade_size, available[give_index])
+                ratio = 2 if emergency[need] and budget >= 2 else 1
+                amount = min(budget // ratio, deficit[need])
                 give, get = [0, 0, 0], [0, 0, 0]
-                give[give_index] = get[need] = amount
+                give[give_index], get[need] = ratio * amount, amount
                 actions.append(Action('offer', (ad.station_id, tuple(give), tuple(get), s.tick + ttl),
                                       f'Seek {NAMES[need]} from {ad.station_id} using surplus {NAMES[give_index]}; '
-                                      'provisional 1:1 exchange.', ('offer', ad.station_id)))
+                                      f'{ratio}:1 exchange' + (' (emergency).' if ratio == 2 else '.'),
+                                      ('offer', ad.station_id)))
     # Gifts are optional, small, and only made when all our upkeep reserves are covered.
     if policy.gift_size and not any(deficit):
         for ad in ads:
             for i in range(3):
-                if RESOURCES[i] in ad.seeking.items and available[i]:
+                if (RESOURCES[i] == s.self.specialty
+                        and RESOURCES[i] in ad.seeking.items and available[i]):
                     give = [0, 0, 0]
                     give[i] = min(policy.gift_size, available[i])
                     actions.append(Action('offer', (ad.station_id, tuple(give), (0, 0, 0), s.tick + ttl),

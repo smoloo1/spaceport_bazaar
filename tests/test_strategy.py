@@ -10,7 +10,7 @@ from strategy import Policy, candidates
 from automated import AutomatedSession
 
 
-def snapshot(inventory=(10, 2, 10)):
+def snapshot(inventory=(10, 4, 10)):
     msg = state_message()
     s = msg.state
     s.self.inventory.CopyFrom(bazaar.bundle(*inventory))
@@ -47,6 +47,87 @@ def offer(s, give=(0, 1, 0), receive=(1, 0, 0), outgoing=False, oid='offer'):
 
 
 class StrategyTests(unittest.TestCase):
+    def test_emergency_offer_pays_two_for_one(self):
+        s = snapshot((10, 0, 10)).state
+        ad(s)
+        action = next(a for a in candidates(s) if a.kind == 'offer')
+        self.assertEqual(action.args[1:3], ((2, 0, 0), (0, 1, 0)))
+
+    def test_emergency_never_spends_reserve(self):
+        s = snapshot((4, 0, 10)).state
+        ad(s)
+        action = next(a for a in candidates(s) if a.kind == 'offer')
+        self.assertEqual(action.args[1:3], ((1, 0, 0), (0, 1, 0)))
+        s.self.inventory.water = 3
+        self.assertFalse(any(a.kind == 'offer' for a in candidates(s)))
+
+    def test_incoming_premium_only_for_emergency_and_capped(self):
+        s = snapshot((10, 0, 10)).state
+        incoming = offer(s, receive=(2, 0, 0))
+        self.assertEqual(candidates(s)[0].kind, 'accept')
+        s.self.inventory.food = 1  # Exactly one turn is outside the default emergency.
+        self.assertFalse(any(a.kind == 'accept' for a in candidates(s)))
+        s.self.inventory.food = 0
+        incoming.receive.water = 3
+        self.assertFalse(any(a.kind == 'accept' for a in candidates(s, Policy(trade_size=5))))
+
+    def test_premium_must_address_actual_emergency(self):
+        s = snapshot((10, 0, 10)).state
+        offer(s, give=(0, 0, 1), receive=(2, 0, 0))
+        self.assertFalse(any(a.kind == 'accept' for a in candidates(s)))
+
+    def test_emergency_uses_reported_upkeep_and_configurable_horizon(self):
+        s = snapshot((10, 1, 10)).state
+        s.self.upkeep_per_tick.food = 2
+        ad(s)
+        action = next(a for a in candidates(s) if a.kind == 'offer')
+        self.assertEqual(action.args[1], (2, 0, 0))
+        s.self.upkeep_per_tick.food = 1
+        action = next(a for a in candidates(s, Policy(emergency_ticks=2)) if a.kind == 'offer')
+        self.assertEqual(action.args[1], (2, 0, 0))
+        with self.assertRaises(ValueError):
+            Policy(emergency_ticks=0)
+
+    def test_specialty_sets_reserve_for_each_planet(self):
+        for specialty in (pb.RESOURCE_WATER, pb.RESOURCE_FOOD, pb.RESOURCE_COMPONENTS):
+            s = snapshot((4, 4, 4)).state
+            s.self.specialty = specialty
+            publication = next(a for a in candidates(s) if a.kind == 'advertise')
+            self.assertEqual(publication.args[0], (specialty,))
+            self.assertEqual(set(publication.args[1]), {1, 2, 3} - {specialty})
+
+    def test_imported_reserve_is_configurable(self):
+        s = snapshot((4, 4, 4)).state
+        publication = next(a for a in candidates(s, Policy(imported_reserve_ticks=3)) if a.kind == 'advertise')
+        self.assertEqual(publication.args[1], ())
+        with self.assertRaises(ValueError):
+            Policy(imported_reserve_ticks=0)
+
+    def test_no_imported_gifts_even_with_large_surplus(self):
+        s = snapshot((10, 100, 100)).state
+        ad(s, seeking=(pb.RESOURCE_FOOD, pb.RESOURCE_COMPONENTS))
+        self.assertFalse(any(a.kind == 'offer' for a in candidates(s)))
+
+    def test_incoming_trade_cannot_spend_imported_reserve(self):
+        s = snapshot((1, 5, 10)).state
+        offer(s, give=(1, 0, 0), receive=(0, 1, 0))
+        self.assertFalse(any(a.kind == 'accept' for a in candidates(s)))
+        s.self.inventory.food = 6
+        self.assertEqual(candidates(s)[0].kind, 'accept')
+
+    def test_specialty_is_preferred_for_outgoing_payment(self):
+        s = snapshot((10, 10, 4)).state
+        s.self.specialty = pb.RESOURCE_FOOD
+        ad(s, selling=(pb.RESOURCE_COMPONENTS,), seeking=(pb.RESOURCE_WATER, pb.RESOURCE_FOOD))
+        action = next(a for a in candidates(s) if a.kind == 'offer')
+        self.assertEqual(action.args[1], (0, 1, 0))
+
+    def test_large_last_production_does_not_replace_reserve_stock(self):
+        s = snapshot((3, 5, 5)).state
+        s.self.last_production.water = 100
+        ad(s)
+        self.assertFalse(any(a.kind == 'offer' for a in candidates(s)))
+
     def test_shortage_trade_and_serialization(self):
         s = snapshot().state
         ad(s)

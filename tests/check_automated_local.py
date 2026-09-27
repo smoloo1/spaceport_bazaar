@@ -66,7 +66,7 @@ async def scenario(ws):
     assert bazaar.as_tuple(trade.body.give) == (1, 0, 0)
     assert bazaar.as_tuple(trade.body.receive) == (0, 1, 0)
     # Simulate immediate peer acceptance; use a new authoritative inventory.
-    s.self.inventory.CopyFrom(bazaar.bundle(9, 3, 10))
+    s.self.inventory.CopyFrom(bazaar.bundle(9, 5, 10))
     await result(trade, 'barter')
     await send_state()
     advert = await command('advertise')
@@ -76,7 +76,7 @@ async def scenario(ws):
     await send_state()
     # Next tick: a supplied station can help a peer without manual input.
     s.tick += 1
-    s.self.inventory.CopyFrom(bazaar.bundle(8, 3, 9))
+    s.self.inventory.CopyFrom(bazaar.bundle(8, 5, 9))
     await send_state()
     gift = await command('offer')
     assert bazaar.as_tuple(gift.body.give) == (1, 0, 0)
@@ -90,7 +90,7 @@ async def scenario(ws):
         raise AssertionError('Trading happened after game ended')
     except asyncio.TimeoutError:
         pass
-    assert all(v >= 3 for v in bazaar.as_tuple(s.self.inventory))
+    assert all(v >= reserve for v, reserve in zip(bazaar.as_tuple(s.self.inventory), (3, 5, 5)))
 
 
 async def main():

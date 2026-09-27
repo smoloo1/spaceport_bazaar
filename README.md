@@ -34,8 +34,9 @@ python client/run_live.py --automate
 ```
 
 This declares readiness, waits for the administrator to start the game, and
-selects trades using a three-tick upkeep reserve. It can offer small gifts from
-surplus to planets advertising a need. Use `--advisory` instead to display
+selects trades using a three-tick upkeep reserve for our production specialty
+and five ticks for other resources. It can offer small gifts of our specialty
+from surplus to planets advertising a need. Use `--advisory` instead to display
 recommendations without sending commands. See the
 [automated trading guide](docs/automated-trading.md) for policy settings,
 local tests, and limitations.

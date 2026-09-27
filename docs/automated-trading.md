@@ -29,18 +29,29 @@ candidate per update and do not simulate execution or future inventory.
 
 ## Initial policy
 
-- Retain three ticks of the reported upkeep for each resource. Do not assume
-  last tick's production guarantees future production.
+- Identify our production resource from `self.specialty`. Retain three ticks
+  of its reported upkeep and five ticks of upkeep for each other resource.
+  Start seeking imported resources when they fall below that larger target.
+  Do not assume last tick's production guarantees future production, or spend
+  stock below the reserve just because it is our specialty.
 - Subtract the full give amounts of open outgoing offers from spendable
   surplus, because those offers do not reserve stock on the server.
 - Withdraw outgoing offers when their aggregate commitments threaten reserves.
 - Accept free gifts and small incoming exchanges that improve shortages without
   paying from reserves or committed stock. When fully supplied, also accept
-  small surplus-funded exchanges proposed by peers.
+  small surplus-funded exchanges proposed by peers. Paid incoming exchanges
+  normally require at least one unit received per unit paid; a premium of up
+  to two paid per urgently needed unit is allowed only during an emergency.
 - Seek the lowest-coverage shortage first. Offer up to two surplus units in a
-  provisional one-for-one exchange with a peer advertising compatible interests.
-- When all reserves are covered, offer up to one surplus unit as a gift to a
-  peer advertising a need. Rotate peer ordering by tick.
+  normally one-for-one exchange with a peer advertising compatible interests.
+  When stock covers less than one turn of reported upkeep, offer up to two
+  surplus units for one needed unit. Fall back to one-for-one if the payment
+  cap or available surplus cannot cover two units.
+  Prefer paying with our specialty; imported resources can only be spent from
+  surplus above their larger reserves.
+- When all reserves are covered, offer up to one surplus unit of our specialty
+  as a gift to a peer advertising a need. Never automatically gift imported
+  resources. Rotate peer ordering by tick.
 - Keep at most one open outgoing offer per peer. Attempt at most one outgoing
   offer to each peer per tick in a session. A peer may decline or ignore a gift.
 - Advertise surplus and shortages after available trades. Use short, two-tick
@@ -49,11 +60,14 @@ candidate per update and do not simulate execution or future inventory.
 Examples of policy configuration:
 
 ```sh
-python client/run_live.py --automate --reserve-ticks 5 --trade-size 1 --gift-size 1
+python client/run_live.py --automate --reserve-ticks 3 --imported-reserve-ticks 5 --trade-size 1 --gift-size 1
 python client/run_live.py --automate --gift-size 0
 ```
 
-`--reserve-ticks` and `--trade-size` must be positive. `--gift-size 0` disables
+`--reserve-ticks`, `--imported-reserve-ticks`, `--emergency-ticks`, and
+`--trade-size` must be positive. `--emergency-ticks` defaults to 1: an emergency
+means inventory is strictly below that many turns of reported upkeep.
+Reserves and the payment cap remain binding even in an emergency. `--gift-size 0` disables
 outgoing gifts. The trade-size cap applies to total units paid when accepting
 an incoming offer and the units paid in a proposed exchange. Free incoming
 gifts are not subject to that payment cap. These settings apply to advisory
@@ -97,7 +111,7 @@ advancing the exercise.
 
 Peer stock is private. Advertisements reveal interest, not verified shortages,
 so cooperation cannot be targeted using actual peer inventory. The reserve
-horizon, small gifts, and one-for-one rates are initial assumptions to evaluate.
+horizons, emergency threshold, small gifts, and exchange rates need evaluation.
 The policy may refuse a risky emergency trade even when taking that risk could
 improve survival. It does not forecast production, learn exchange rates, or
 optimize a formal score. Open offers can settle before a withdrawal reaches the

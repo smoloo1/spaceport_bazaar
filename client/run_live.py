@@ -65,9 +65,13 @@ async def main():
     modes.add_argument("--interactive", action="store_true", help="enable manual trading commands")
     modes.add_argument("--automate", action="store_true", help="automatically trade for survival and cooperation")
     modes.add_argument("--advisory", action="store_true", help="explain strategy recommendations without sending messages")
-    parser.add_argument("--reserve-ticks", type=int, default=3, help="upkeep reserve horizon (default: 3)")
+    parser.add_argument("--reserve-ticks", type=int, default=3, help="upkeep reserve for our production specialty (default: 3)")
+    parser.add_argument("--imported-reserve-ticks", type=int, default=5,
+                        help="upkeep reserve for resources we do not produce (default: 5)")
     parser.add_argument("--trade-size", type=int, default=2, help="maximum units paid per automated trade (default: 2)")
     parser.add_argument("--gift-size", type=int, default=1, help="maximum units in an outgoing gift; 0 disables gifts")
+    parser.add_argument("--emergency-ticks", type=int, default=1,
+                        help="allow up to 2:1 when stock covers fewer than this many upkeep ticks (default: 1)")
     parser.add_argument("--practice", action="store_true",
                         help="use the local practice server and its P01 credentials instead of .env")
     parser.add_argument("--credentials", type=Path,
@@ -87,7 +91,8 @@ async def main():
         parser.error("--advisory sends no messages; omit --ready")
     from strategy import Policy
     try:
-        policy = Policy(reserve_ticks=args.reserve_ticks, trade_size=args.trade_size, gift_size=args.gift_size)
+        policy = Policy(reserve_ticks=args.reserve_ticks, imported_reserve_ticks=args.imported_reserve_ticks,
+                        trade_size=args.trade_size, gift_size=args.gift_size, emergency_ticks=args.emergency_ticks)
     except ValueError as exc:
         parser.error(str(exc))
     url = args.url or (bazaar.PRACTICE_URL if args.practice else bazaar.DEFAULT_URL)

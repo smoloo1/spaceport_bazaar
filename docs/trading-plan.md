@@ -55,12 +55,13 @@ transaction amounts again to inventory that already includes them.
 For each resource with positive upkeep:
 
 - Coverage in ticks = current inventory / upkeep per tick.
-- Reserve target = upkeep per tick multiplied by a configurable reserve horizon.
+- Reserve target = upkeep per tick multiplied by the applicable reserve horizon:
+  three ticks for `self.specialty`, five ticks for resources we do not produce.
 - Deficit = max(0, reserve target - inventory).
 - Surplus = max(0, inventory - reserve target).
 
-Start evaluation with a three-tick horizon. This is a tunable assumption, not
-a game requirement. Zero-upkeep resources have no upkeep deficit; any reason
+Start evaluation with a three-tick specialty horizon and five-tick imported
+resource horizon. These are tunable assumptions, not game requirements. Zero-upkeep resources have no upkeep deficit; any reason
 to retain them beyond trading value depends on the scoring rules.
 
 Initially measure coverage from inventory alone. Report last production
@@ -82,10 +83,13 @@ separately; do not assume it guarantees future production.
   can collectively overcommit our surplus.
 - Reassess or withdraw stale outgoing offers after inventory or needs change.
 
-Initial implementation uses provisional one-for-one outgoing exchanges of at
+The agreed policy uses normal one-for-one outgoing exchanges of at
 most two units and gifts of at most one unit per peer per tick, funded by
-uncommitted surplus. Trade and gift caps are configurable. It does not relax
-reserves for emergencies. These choices need evaluation; they are not claims
+uncommitted surplus. Prefer our specialty for outgoing payments and restrict
+gifts to that specialty. Imported resources must retain their larger reserves. Trade and gift caps are configurable. It does not relax
+reserves for emergencies. When stock is below one turn of reported upkeep,
+it may pay up to two surplus units per urgently needed unit; the payment cap
+still applies. This threshold is configurable. These choices need evaluation; they are not claims
 that one-for-one is fair or gifting surplus is always beneficial.
 
 ### Control execution
@@ -123,3 +127,13 @@ same checks and remain an explicit user-selected mode.
 Track health, unmet upkeep, shortage ticks, completed trades, rejected commands,
 and final outcomes during evaluation. Choose the final optimization target
 after the scoring rules are confirmed.
+
+## Confirmed preferences and remaining uncertainty
+
+- Help peers only with surplus above reserves. Do not relax reserves to help.
+- Allow up to 2:1 in emergencies, for outgoing proposals and incoming offers
+  that address the urgent resource. Default emergency threshold: stock below
+  one turn of upkeep; this operational threshold remains tunable.
+- Production reliability is unknown. Starting stocks can vary by planet.
+  Use each current snapshot's inventory, specialty, and upkeep rather than
+  fixed starting values. Do not count projected production as spendable stock.
