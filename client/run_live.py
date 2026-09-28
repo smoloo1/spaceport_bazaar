@@ -12,6 +12,7 @@ from websockets.exceptions import ConnectionClosed, InvalidHandshake, InvalidSta
 
 import bazaar
 import bazaar_pb2 as pb
+from journal import Journal, LogWriteError
 
 
 def load_live_token(env_file):
@@ -68,6 +69,8 @@ async def main():
     parser.add_argument("--reserve-ticks", type=int, default=3, help="upkeep reserve for our production specialty (default: 3)")
     parser.add_argument("--imported-reserve-ticks", type=int, default=5,
                         help="upkeep reserve for resources we do not produce (default: 5)")
+    parser.add_argument("--imported-seek-ticks", type=int,
+                        help="start seeking imported resources at this horizon (default: same as reserve)")
     parser.add_argument("--trade-size", type=int, default=2, help="maximum units paid per automated trade (default: 2)")
     parser.add_argument("--gift-size", type=int, default=1, help="maximum units in an outgoing gift; 0 disables gifts")
     parser.add_argument("--emergency-ticks", type=int, default=1,
@@ -78,6 +81,9 @@ async def main():
                         help="override the practice credentials file (requires --practice)")
     parser.add_argument("--env-file", type=Path,
                         default=Path(__file__).resolve().parents[1] / ".env")
+    parser.add_argument("--log-dir", type=Path,
+                        default=Path(__file__).resolve().parents[1] / "run/logs",
+                        help="directory for a new JSONL run history (default: project run/logs)")
     parser.add_argument("--ready", action="store_true",
                         help="declare readiness after receiving the first state")
     parser.add_argument("-v", "--verbose", action="store_true",
@@ -92,7 +98,8 @@ async def main():
     from strategy import Policy
     try:
         policy = Policy(reserve_ticks=args.reserve_ticks, imported_reserve_ticks=args.imported_reserve_ticks,
-                        trade_size=args.trade_size, gift_size=args.gift_size, emergency_ticks=args.emergency_ticks)
+                        trade_size=args.trade_size, gift_size=args.gift_size, emergency_ticks=args.emergency_ticks,
+                        imported_seek_ticks=args.imported_seek_ticks)
     except ValueError as exc:
         parser.error(str(exc))
     url = args.url or (bazaar.PRACTICE_URL if args.practice else bazaar.DEFAULT_URL)
@@ -105,9 +112,17 @@ async def main():
     except (ValueError, OSError, LookupError) as exc:
         parser.error(str(exc))
 
+    try:
+        journal = Journal(args.log_dir, token)
+    except OSError:
+        parser.error("Could not create a run log. Check --log-dir permissions and free disk space.")
+    print(f"Run history: {journal.path}", flush=True)
     print("Connecting to Bazaar. Press Ctrl+C to stop.", flush=True)
     try:
-        async with bazaar.BazaarClient(url, token, verbose=args.verbose) as client:
+        journal.record('session_start', mode='automated' if args.automate else
+                       'advisory' if args.advisory else 'manual' if args.interactive else 'observe',
+                       practice=args.practice)
+        async with bazaar.BazaarClient(url, token, verbose=args.verbose, journal=journal) as client:
             if args.automate or args.advisory:
                 from automated import run_automated
                 await run_automated(client, policy, advisory=args.advisory)
@@ -116,6 +131,9 @@ async def main():
                 await interact(client, args.ready)
             else:
                 await observe(client, args.ready)
+    except LogWriteError:
+        print("Could not save run history; client stopped. Check log directory and disk space.", file=sys.stderr)
+        return 1
     except InvalidStatus as exc:
         status = exc.response.status_code
         if status == 401:
@@ -144,6 +162,11 @@ async def main():
     except (bazaar.ProtocolViolation, DecodeError):
         print("Protocol error. Review the last server message before reconnecting.", file=sys.stderr)
         return 1
+    finally:
+        try:
+            journal.close()
+        except LogWriteError:
+            print("Could not finish writing run history.", file=sys.stderr)
     return 0
 
 

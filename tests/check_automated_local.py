@@ -5,6 +5,7 @@ Run: python tests/check_automated_local.py. Does not contact the live game.
 import asyncio
 import contextlib
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'client'))
@@ -12,8 +13,9 @@ from websockets.asyncio.server import serve
 import bazaar
 import bazaar_pb2 as pb
 from automated import run_automated
-from test_manual import fill_required
-from test_strategy import snapshot, ad
+from journal import Journal
+from helpers import fill_required
+from helpers import snapshot, ad
 
 
 async def scenario(ws):
@@ -104,14 +106,29 @@ async def main():
             outcome.set_result(None)
     async with serve(handler, '127.0.0.1', 0, subprotocols=[bazaar.SUBPROTOCOL]) as server:
         port = server.sockets[0].getsockname()[1]
-        async with bazaar.BazaarClient(f'ws://127.0.0.1:{port}/ws', 'local-test-token') as client:
-            task = asyncio.create_task(run_automated(client))
+        with tempfile.TemporaryDirectory() as directory:
+            journal = Journal(directory, 'local-test-token')
             try:
-                await asyncio.wait_for(outcome, 10)
+                async with bazaar.BazaarClient(f'ws://127.0.0.1:{port}/ws', 'local-test-token', journal=journal) as client:
+                    task = asyncio.create_task(run_automated(client))
+                    try:
+                        await asyncio.wait_for(outcome, 10)
+                    finally:
+                        task.cancel()
+                        with contextlib.suppress(asyncio.CancelledError):
+                            await task
             finally:
-                task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await task
+                journal.close()
+            import json
+            raw = journal.path.read_text()
+            assert 'local-test-token' not in raw
+            entries = [json.loads(line) for line in raw.splitlines()]
+            decisions = {e['request_id'] for e in entries if e['event'] == 'decision' and e.get('request_id')}
+            results = {e['message']['result']['request_id'] for e in entries
+                       if e['event'] == 'message' and 'result' in e['message']}
+            assert len(results) == 3 and results <= decisions
+            assert entries[-1]['event'] == 'session_end'
+            print('PASS: decision reasons correlate with all trade results; token absent from saved history')
     print('PASS: automated readiness, pause gate, shortage barter, peer gift, reserve preservation, and finished-game gate over local WebSockets')
 
 

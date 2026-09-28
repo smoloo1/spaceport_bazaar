@@ -1,5 +1,6 @@
 """Execute cooperative decisions one at a time using authoritative snapshots."""
 import uuid
+from dataclasses import asdict
 
 import bazaar
 import bazaar_pb2 as pb
@@ -21,6 +22,15 @@ class AutomatedSession:
         self.attempted = set()
         self.cooldown_until = 0
         self.capacity_exhausted = False
+        self.client.record('policy', mode='advisory' if advisory else 'automated', settings=asdict(policy))
+
+    def record_decision(self, reason, action=None, request_id=None):
+        s = self.state
+        self.client.record('decision', run_id=s.run_id, tick=s.tick,
+                           snapshot_sequence=s.snapshot_sequence, world_version=s.world_version,
+                           station_id=s.self_station_id, reason=reason,
+                           action=action.kind if action else None,
+                           arguments=action.args if action else None, request_id=request_id)
 
     async def receive(self, msg):
         kind = msg.WhichOneof('message')
@@ -83,15 +93,24 @@ class AutomatedSession:
             action = next((a for a in actions if a.key not in self.attempted), None)
             if action:
                 self.attempted.add(action.key)
+                self.record_decision(action.reason, action)
                 print(f'Advice: {action.kind} {action.args}: {action.reason}', flush=True)
+            else:
+                self.record_decision('no_new_advisory_action')
             return
         if not self.ready or self.pending or self.capacity_exhausted or s.tick < self.cooldown_until:
+            reason = ('waiting_for_readiness' if not self.ready else
+                      'waiting_for_command_result_and_state' if self.pending else
+                      'request_capacity_exhausted' if self.capacity_exhausted else 'rate_limit_cooldown')
+            self.record_decision(reason)
             return
         # Count recorded commands as well as commands sent locally. This also
         # respects records left by an earlier connection in the same tick.
         if len(self.commands_this_tick) >= s.rules.new_commands_per_station_per_tick:
+            self.record_decision('tick_command_budget_exhausted')
             return
         if len(s.request_results.items) >= s.rules.max_request_records_per_station:
+            self.record_decision('request_record_limit_reached')
             return
         for action in actions:
             if action.key in self.attempted:
@@ -100,13 +119,18 @@ class AutomatedSession:
             request_id = 'auto-' + uuid.uuid4().hex
             msg = action.message(s, request_id)
             if len(msg.SerializeToString()) > min(bazaar.MAX_COMMAND_BYTES, s.rules.max_command_bytes):
+                self.record_decision('command_exceeds_payload_limit', action, request_id)
                 continue
+            self.record_decision(action.reason, action, request_id)
             print(f'Auto: {action.kind} {action.args}: {action.reason}', flush=True)
             self.pending = request_id
             self.result_received = False
             self.commands_this_tick.add(request_id)
             await self.client.send(msg)
             return
+        self.record_decision('game_not_running' if s.phase != pb.PHASE_RUNNING else
+                             'station_failed' if s.self.failed_once or not s.self.health else
+                             'no_new_eligible_action')
 
 
 async def run_automated(client, policy=Policy(), advisory=False):
