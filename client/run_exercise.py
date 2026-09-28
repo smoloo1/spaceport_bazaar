@@ -1,4 +1,4 @@
-"""Walk through the practice server's 10-step sample exchange as P01.
+"""Walk through the practice server exchange and check P01's trade choices.
 
 Start the server first (scripts/start-server.sh), then:
     python client/run_exercise.py
@@ -13,6 +13,7 @@ from pathlib import Path
 import bazaar
 import bazaar_pb2 as pb
 from bazaar import as_tuple, nullable_value
+from strategy import candidates
 
 
 class ExerciseFailed(Exception):
@@ -60,6 +61,35 @@ def find(items, **fields):
 
 def step(n, title):
     print(f"\n== Step {n}: {title}")
+
+
+def check_ad_response(state, selling, seeking, expected_kind, expected_give=None,
+                      expected_receive=None):
+    """Check the strategy's action for one hypothetical current P02 listing."""
+    scenario = pb.State()
+    scenario.CopyFrom(state)
+    scenario.advertisements.items.clear()
+    ad = scenario.advertisements.items.add()
+    ad.advertisement_id = "practice-p02-ad"
+    ad.station_id = "P02"
+    ad.selling.items.extend(selling)
+    ad.seeking.items.extend(seeking)
+    ad.created_tick = scenario.tick
+    ad.expires_tick = scenario.tick + 2
+    ad.created_version = scenario.world_version
+    ad.status = pb.PUBLICATION_STATUS_ACTIVE
+    actions = [a for a in candidates(scenario) if a.kind == "offer"]
+    matching = [a for a in actions if a.args[0] == "P02"]
+    check(len(matching) == (1 if expected_kind else 0),
+          f"expected {1 if expected_kind else 0} P02 offers, got {len(matching)}")
+    if expected_kind:
+        action = matching[0]
+        give, receive = action.args[1], action.args[2]
+        check(action.kind == expected_kind, f"expected {expected_kind}, got {action.kind}")
+        check(give == expected_give,
+              f"offer gives {give}, expected {expected_give}")
+        check(receive == expected_receive,
+              f"offer receives {receive}, expected {expected_receive}")
 
 
 async def run(client):
@@ -170,7 +200,46 @@ async def run(client):
         check(as_tuple(getattr(me, name)) == (0, 0, 0), f"{name} should be zero")
     check(me.shortage_ticks == 0, "shortage_ticks should be zero")
 
-    check((client.sent, client.received) == (8, 16), "expected 8 sent and 16 received")
+    step(11, "retry the completed withdrawal with the same request ID")
+    # The server retains command results so a client can safely recover after
+    # losing a response. Repeating the exact request must not withdraw twice
+    # or create another result; the server returns the cached result and the
+    # current state.
+    await client.send(bazaar.withdraw(run_id, "student-withdraw-1", advertisement_id))
+    retry_result = await expect_ok(client, "student-withdraw-1")
+    check(nullable_value(retry_result.object_id) == advertisement_id,
+          "cached result does not name the withdrawn advertisement")
+    state = await expect_state(client, 9, 10, (28, 31, 31))
+    check(not find(state.advertisements.items, advertisement_id=advertisement_id),
+          "retry recreated or retained the withdrawn advertisement")
+    check(len(state.transactions.items) == 2, "retry changed transaction history")
+    check(len(state.request_results.items) == 5,
+          "exact retry should not consume another stored-result slot")
+
+    step(12, "choose offers from P02's advertised needs and stock")
+    # Use synthetic successive P02 listings because the practice server's
+    # scripted exchange only publishes its fixed sample advertisements.
+    # First, with all upkeep reserves covered, answer P02's request for our
+    # water specialty with a one-unit gift.
+    gift_state = pb.State()
+    gift_state.CopyFrom(state)
+    gift_state.self.inventory.CopyFrom(bazaar.bundle(water=10, food=10, components=10))
+    check_ad_response(gift_state, [pb.RESOURCE_FOOD], [pb.RESOURCE_WATER],
+                      "offer", (1, 0, 0), (0, 0, 0))
+
+    # Then test a need funded by specialty surplus. Food is below its five-unit
+    # reserve; offer at most the policy's two-unit trade budget in water.
+    trade_state = pb.State()
+    trade_state.CopyFrom(state)
+    trade_state.self.inventory.CopyFrom(bazaar.bundle(water=10, food=3, components=10))
+    check_ad_response(trade_state, [pb.RESOURCE_FOOD], [pb.RESOURCE_WATER],
+                      "offer", (2, 0, 0), (0, 2, 0))
+
+    # P02 asking for our food (which is already below reserve) must not prompt
+    # P01 to send it away.
+    check_ad_response(trade_state, [], [pb.RESOURCE_FOOD], None)
+
+    check((client.sent, client.received) == (9, 18), "expected 9 sent and 18 received")
     print(f"\nAll steps passed. Sent {client.sent} messages, received {client.received}.")
 
 

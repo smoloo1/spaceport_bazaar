@@ -74,8 +74,14 @@ python client/run_exercise.py
 ```
 
 The runner connects to `ws://127.0.0.1:3001/ws` and reads P01's token from
-`run/validation-credentials.json`. It checks all 10 steps, expecting 8 sent
-messages, 16 received messages, and final inventory `(28, 31, 31)`.
+`run/validation-credentials.json`. It checks the 10-step exchange, then retries
+the completed withdrawal with the same request ID to verify cached-result
+handling. It also checks P01's strategy against three successive simulated P02
+advertisements: a request for P01's water specialty, a food offer P01 can fund
+from water surplus, and a request for food while P01 is short on food. The
+practice server only supports its fixed exchange, so these last checks evaluate
+the strategy's proposed offers against synthetic snapshots. The runner expects
+9 sent messages, 18 received messages, and final inventory `(28, 31, 31)`.
 The server writes its report to `run/validation-report.json`.
 
 Stop the server with Ctrl+C and restart it before repeating the exercise.
