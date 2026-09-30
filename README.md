@@ -1,75 +1,102 @@
-# [how bazaar](https://www.youtube.com/watch?v=C2cMG33mWVY)
+# Spaceport Bazaar client
 
-![Spaceport Bazaar](artifacts/hero.png)
+An automated trading client that aims to survive while helping other planets.
+**Start with [the game-day guide](docs/game-day.md)** for the next classroom run.
 
-## Connect to the live game
+## Setup and run
 
-Install dependencies (or rebuild your devcontainer after dependency changes):
-
-```sh
-python -m pip install -r client/requirements.txt
-```
-
-Store your assigned client token as `BAZAAR_TOKEN` in the project `.env` file.
-Keep your observatory token in `BAZAAR_OBSERVATORY_TOKEN`; the trading client
-does not use it. This file is excluded from Git.
-
-```sh
-python client/run_live.py
-```
-
-This connects to `wss://spaceport.edneo.com/ws`, loads `.env` automatically,
-and displays incoming game updates. An exported `BAZAAR_TOKEN` takes precedence
-over `.env`. Use `--verbose` to see full offers, advertisements, and state.
-Use `--ready` to declare readiness after reading the initial state:
-
-```sh
-python client/run_live.py --ready
-```
-
-The live entry point currently displays updates and optionally declares readiness;
-it does not place trades. It waits through idle periods. Stop with Ctrl+C and
-rerun to reconnect. A new connection replaces any existing client connection
-for your station. The observatory is at https://spaceport.edneo.com.
-
-## Run the practice exchange
-
-Open this project in its VS Code devcontainer. The container installs Python
-dependencies and generates `client/bazaar_pb2.py` automatically.
-
-From the project root, start the practice server:
-
-```sh
-sh scripts/start-server.sh
-```
-
-In a second terminal in the same container:
-
-```sh
-python client/run_exercise.py
-```
-
-The runner connects to `ws://127.0.0.1:3001/ws` and reads P01's token from
-`run/validation-credentials.json`. It checks all 10 steps, expecting 8 sent
-messages, 16 received messages, and final inventory `(28, 31, 31)`.
-The server writes its report to `run/validation-report.json`.
-
-Stop the server with Ctrl+C and restart it before repeating the exercise.
-The runner requires a fresh exercise and does not resume an interrupted run.
-
-For a manual Linux setup with Python installed:
+Open this repository in its VS Code devcontainer. It installs dependencies and
+builds the generated Protobuf bindings. For an existing Linux Python environment:
 
 ```sh
 python -m pip install -r client/requirements.txt
 sh client/generate.sh
 ```
 
-Use `--url` and `--credentials` for a different practice server address or
-credentials file. Environment tokens never override the credentials file.
-To explicitly use an exported token, supply `--token-env BAZAAR_TOKEN` instead
-of `--credentials`. The runner does not automatically load `.env`.
-The remote URL remains available as `bazaar.DEFAULT_URL` for other clients;
-this scripted runner is for servers implementing the starter exercise.
+Put your assigned client token in the local, Git-ignored `.env` file:
 
-See the [starter guide](artifacts/bazaar-protobuf-starter-linux/README.md)
-for protocol details and platform requirements.
+```dotenv
+BAZAAR_TOKEN=your_client_token
+```
+
+An exported `BAZAAR_TOKEN` takes precedence over `.env`. The separate observatory
+token is not used by this client.
+
+Check the live connection, then stop with Ctrl+C:
+
+```sh
+python client/run_live.py
+```
+
+A received state confirms connection and decoding. Start automated trading:
+
+```sh
+python client/run_live.py --automate
+```
+
+This connects to `wss://spaceport.edneo.com/ws`, declares readiness, and waits
+for the administrator to start the game. Run only one client for your station.
+Run histories are saved under `run/logs/`. See the game-day guide for HTTP
+errors, reconnection, and reviewing logs after the game.
+
+## Current documentation
+
+| Read this | For |
+| --- | --- |
+| [Game day](docs/game-day.md) | Startup, connection checks, logs, and troubleshooting |
+| [Architecture](docs/architecture.md) | What each active module does and how they fit together |
+| [Automated strategy](docs/automated-trading.md) | Current decision rules, settings, and limitations |
+| [Manual controls](docs/manual-trading.md) | Optional interactive debugging and practice walkthrough |
+| [Testing](tests/README.md) | Fast checks, integration tests, and how they differ from simulations |
+
+`--advisory` explains recommendations without sending commands. `--interactive`
+enables manual controls. These are alternative modes of the same client, not
+older versions. The automated strategy is provisional and does not guarantee
+individual or collective survival.
+
+## Local checks
+
+```sh
+python -m unittest discover -s tests -v
+python tests/check_automated_local.py
+python tests/check_manual_local.py
+```
+
+For the supplied practice exercise, start this in one container terminal:
+
+```sh
+sh scripts/start-server.sh
+```
+
+Then run this in another terminal in the same container:
+
+```sh
+python client/run_exercise.py
+```
+
+The exercise uses localhost and generated practice credentials, not your live
+credentials. Restart the practice server before repeating it. Its fixed sequence
+is a protocol check, not a simulation of our autonomous strategy.
+
+## Repository map
+
+```text
+client/           Current runtime code and generated Protobuf bindings
+scripts/          Server startup and log summary commands
+tests/           Unit tests, local integration checks, and shared fixtures
+simulations/      Optional offline strategy experiments
+data/  Original class log used by the experiments
+docs/             Current guides
+  analysis/       Historical V1 analysis snapshots
+  archive/v1/     Superseded planning notes
+artifacts/        Supplied starter kit and original assets
+run/              Local credentials, histories, and generated experiment output (ignored)
+```
+
+The original [starter guide](artifacts/bazaar-protobuf-starter-linux/README.md)
+is vendor material. Generated `client/bazaar_pb2.py` comes from its schema; do
+not edit the generated file by hand.
+
+For previous findings and reproduction commands, see
+[the experiments index](simulations/README.md). Historical V1 documents describe
+what was planned or tested at that time; current guides above describe what to run.

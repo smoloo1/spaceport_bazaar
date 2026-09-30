@@ -157,28 +157,45 @@ class BazaarClient:
             await client.send(bazaar.sync(run_id))
     """
 
-    def __init__(self, url, token, verbose=False):
+    def __init__(self, url, token, verbose=False, journal=None):
         self.url = url
         self.token = token
         self.verbose = verbose
         self.sent = 0
         self.received = 0
         self._ws = None
+        self.journal = journal
+
+    def record(self, event, **fields):
+        if self.journal is not None:
+            self.journal.record(event, **fields)
 
     async def __aenter__(self):
-        self._ws = await connect(
-            self.url,
-            additional_headers={"Authorization": f"Bearer {self.token}"},
-            subprotocols=[SUBPROTOCOL],
-        )
+        try:
+            self._ws = await connect(
+                self.url,
+                additional_headers={"Authorization": f"Bearer {self.token}"},
+                subprotocols=[SUBPROTOCOL],
+            )
+        except Exception as exc:
+            self.record('connection_error', error_type=type(exc).__name__,
+                        http_status=getattr(getattr(exc, 'response', None), 'status_code', None))
+            raise
         if self._ws.subprotocol != SUBPROTOCOL:
             await self._ws.close()
             raise ProtocolViolation(
                 f"server selected subprotocol {self._ws.subprotocol!r}, expected {SUBPROTOCOL!r}")
+        try:
+            self.record('connected', subprotocol=SUBPROTOCOL)
+        except Exception:
+            await self._ws.close()
+            raise
         return self
 
     async def __aexit__(self, *exc):
         await self._ws.close()
+        self.record('disconnected', sent=self.sent, received=self.received,
+                    error_type=exc[0].__name__ if exc[0] else None)
 
     async def send(self, msg):
         data = msg.SerializeToString()  # raises EncodeError if a required field is missing
@@ -201,6 +218,8 @@ class BazaarClient:
         return msg
 
     def _log(self, arrow, msg):
+        if self.journal is not None:
+            self.journal.message('sent' if arrow == '->' else 'received', msg)
         print(f"{arrow} {describe(msg)}")
         if self.verbose:
             print(text_format.MessageToString(msg, indent=4), end="")
