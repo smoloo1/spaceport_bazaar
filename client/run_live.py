@@ -118,7 +118,7 @@ async def main():
         parser.error("Could not create a run log. Check --log-dir permissions and free disk space.")
     print(f"Run history: {journal.path}", flush=True)
     report_script = Path(__file__).resolve().parents[1] / "scripts" / "live-run-log.py"
-    print(f'Live report (run in another terminal): python "{report_script}" --generate-log --watch', flush=True)
+    print(f'Live dashboard (run in another terminal): python "{report_script}"', flush=True)
     print("Connecting to Bazaar. Press Ctrl+C to stop.", flush=True)
     try:
         journal.record('session_start', mode='automated' if args.automate else

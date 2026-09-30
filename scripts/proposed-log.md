@@ -1,42 +1,88 @@
 # Client Action Log
 
-Clients should be able to produce a readable log based on each completed live simulation. It should be able to be generated using a script that takes in the structured log over every action, and produce a summary.
+After each live game, we want a readable summary of everything our client did. A script should read the client's structured log of every action and turn it into that summary.
 
-## Summary Structure
+## What the Summary Should Show
 
-The summary should list every action in order, and provide some way to filter by type.
+The summary lists every action in the order it happened, and can be filtered to one action type.
 
-There should be a visual identification on which resource is the planet's specialty.
+The planet's specialty resource is marked (★) wherever resources appear.
 
-There should be an overall count of advertisements sent and average uptime, count of offers accepted by other planets out of all offers sent to other planets (displayed as an unsimplified fraction), a count of accepted offers from other planets out of all offers received from other planets (displayed as an unsimplified fraction), and a "how long survived" metric to the overview detailing which tick the planet ran out of health and disconnected.
+### Overview
+- **Advertisements:** how many we sent, and how many ticks they stayed active on average.
+- **Our offers:** how many other planets accepted out of how many we sent, e.g. `3/8`. Fractions are not simplified, so `4/8` stays `4/8` instead of becoming `1/2`.
+- **Offers to us:** how many we accepted out of how many other planets sent us, e.g. `2/5`.
+- **Survival:** how many ticks the planet lasted, and the tick where its health ran out.
 
 ### Advertisements
-Each advertisement, tick it was sent out, what tick it expired, inventory range while it was active, and offers received during the active duration.
+For each advertisement: the tick we sent it, the tick it expired, the lowest and highest amount of each resource in our inventory while it was active, and how many offers we received while it was active.
 
 ### Sent Offers
-Each offer, what planet is was to, and if it was eventually accepted.
+For each offer: which planet we sent it to, and whether they accepted it.
 
-Offers should be classified as trades (offering one resource for another) and gifts (offering a resource with nothing in return). 
+Each offer is labeled as a **trade** (we give a resource and ask for one back) or a **gift** (we give a resource and ask for nothing).
 
-### Received Offers and Acceptance
-A log of every offer received, planet from, and if it was accepted or ignored.
+### Received Offers
+For each offer another planet sent us: who sent it, what it asked for, and whether we accepted it or ignored it.
 
 ### Connectivity
-Flag any downtime or client stalls.
+Flag any time the client was disconnected, missed ticks, or stalled.
 
 ### Inventory and Health
-Nice to have - Overview of quantity of each resource in inventory over time and planet health over time presented as a graph
+Graphs of each resource in our inventory, and of planet health, over the course of the game.
 
 ## Implementation
-`client/run_live.py` creates a JSONL journal in `run/logs/` when it starts and appends the live simulation events to that file. The report script then reads the journal; it does not connect to or pull directly from the observatory server. It prints a readable report to the terminal and does not create another JSON file.
+When `client/run_live.py` starts, it creates a new log file (a JSONL journal) in `run/logs/` and writes every game event to it as the game runs. `scripts/live-run-log.py` reads those files and shows them in the terminal. It never connects to the game server and doesn't write any files. It needs nothing beyond the Python standard library.
 
-While `run_live.py` is active, run `python scripts/live-run-log.py --generate-log` in another terminal to report from the newest journal in `run/logs/`. Add `--watch` to refresh the report as new events are written. `--type` can be used with either option, for example `python scripts/live-run-log.py --generate-log --type offer` or `python scripts/live-run-log.py --generate-log --watch --type offer`.
+### Usage
+Open a second terminal (before or after starting `run_live.py`) and run:
 
-The `--type` argument filters by the action/event type. Common types are `advertise`, `offer`, `accept`, `withdraw`, `ready`, and `sync`; the report may also list `connect`, `disconnect`, `connectivity`, and `decision` when those events occur. The default is `all`. The script prints the available types found in the selected journal. You can also pass a specific journal path, for example `python scripts/live-run-log.py path\to\client-log.jsonl --type offer`.
+```sh
+python scripts/live-run-log.py
+```
 
-Excluding **Inventory and Health** as well as **Expansions** section for now. The script has not yet been tested.
+This opens a live dashboard that follows the newest game in `run/logs/` and updates as the client writes. If the client reconnects, the dashboard combines every log file from the same game.
 
-> The Implementation section, `scripts/live-run-log.py`, and `client/run-line.py` have been generated or modified using Codex according to this specification document.
+| Key | Does |
+| --- | --- |
+| `1`–`5` or ←/→ | Switch tab: Overview, Timeline, Offers, Ads, Connection |
+| ↑/↓, PgUp/PgDn | Scroll |
+| `f` | Timeline: cycle the action-type filter |
+| `r` | Timeline: show the strategy's reason for each action |
+| space | Freeze the view so you can read it (press again to resume) |
+| `q` | Quit |
 
-## Expansions 
-An interactive HTML site to track past logs and graphs to compare performance across runs. As well as the same log functionality for local test servers (once a testing server is available).
+**Overview** is the at-a-glance tab: health (bar and history graph), each resource's stock and how many ticks it lasts, trading totals, and a **Needs attention** list (resource about to run out, health falling, stalled client, offers waiting for you, rejected commands). After the game ends, that list becomes **What happened**: when each resource ran out, the lowest health, unused surplus, and the best trading partner. The planet's specialty is marked ★ everywhere.
+
+Other ways to run it:
+
+| Command | What it does |
+| --- | --- |
+| `python scripts/live-run-log.py run/logs/<file>.jsonl` | Dashboard for one specific log |
+| `python scripts/live-run-log.py --plain` | Print a text report once instead of the dashboard (also happens automatically when output is piped to a file) |
+| `python scripts/live-run-log.py --plain --type offer` | Text report listing only `offer` actions |
+
+`--type` accepts `advertise`, `offer`, `accept`, `withdraw`, `ready`, `sync`, `connect`, `disconnect`, `error`, or `advice` (the default is `all`). The report prints which types actually appear in the log. In the dashboard, `--type` sets the Timeline's starting filter.
+
+### Try it with the demo game
+`scripts/demo-game.py` runs a small made-up game on your machine (not the real rules) so you can watch the dashboard move. Use three terminals:
+
+```sh
+python scripts/demo-game.py                                                    # 1: the game
+BAZAAR_TOKEN=demo python client/run_live.py --url ws://127.0.0.1:8765/ws --automate --ready   # 2: our client
+python scripts/live-run-log.py                                                 # 3: the dashboard
+```
+
+Add `--hard` to the demo game to watch the planet fail. Restart the demo game to start a new game.
+
+Set `NO_COLOR=1` to turn off colors. On consoles that can't show symbols like ★ or █, it switches to plain ASCII.
+
+### Limitations
+- The Expansions below are not built yet.
+- Tested on the local practice server's 10-step exchange, the automated-mode local check, and full 60-tick simulated games (including a reconnect and a stall). It has not been run against a real live game yet.
+
+> Codex wrote the first version of `scripts/live-run-log.py` and edited `client/run_live.py`, based on this spec. Claude fixed its bugs and rebuilt it as the interactive dashboard.
+
+## Expansions
+- An interactive HTML site for browsing past logs, with graphs comparing performance across runs.
+- The same report for local practice-server runs, once a practice server that supports this is available.
