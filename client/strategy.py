@@ -19,6 +19,8 @@ class Policy:
     emergency_ticks: int = 1
     imported_seek_ticks: int | None = None
     offer_ttl: int | None = None
+    advertise_specialty_only: bool = False
+    dynamic_gifts: bool = False
 
     def __post_init__(self):
         if min(self.reserve_ticks, self.imported_reserve_ticks, self.trade_size, self.ttl, self.emergency_ticks) < 1 or self.gift_size < 0:
@@ -46,7 +48,7 @@ class Action:
         return getattr(bazaar, self.kind)(state.run_id, request_id, *args)
 
 
-def candidates(s, policy=Policy()):
+def candidates(s, policy=Policy(), recent_specialty_production=None):
     """Return prioritized actions; the executor enforces readiness and command budgets."""
     if s.phase != pb.PHASE_RUNNING or s.self.failed_once or not s.self.health:
         return []
@@ -108,7 +110,9 @@ def candidates(s, policy=Policy()):
     actions.extend(entry[3] for entry in incoming)
     publications = []
 
-    selling = tuple(RESOURCES[i] for i in range(3) if available[i] and not deficit[i])
+    selling = tuple(RESOURCES[i] for i in range(3)
+                    if available[i] and not deficit[i]
+                    and (not policy.advertise_specialty_only or RESOURCES[i] == s.self.specialty))
     seeking = tuple(RESOURCES[i] for i in needs)
     own_ads = [a for a in s.advertisements.items if a.station_id == s.self_station_id
                and a.status == pb.PUBLICATION_STATUS_ACTIVE and a.expires_tick > s.tick]
@@ -161,7 +165,23 @@ def candidates(s, policy=Policy()):
                 if (RESOURCES[i] == s.self.specialty
                         and RESOURCES[i] in ad.seeking.items and available[i]):
                     give = [0, 0, 0]
-                    give[i] = min(policy.gift_size, available[i])
+                    if policy.dynamic_gifts:
+                        cover = inventory[i] / upkeep[i] if upkeep[i] else float('inf')
+                        reserve_cover = policy.reserve_ticks
+                        share = 0.25 if cover <= reserve_cover + 3 else (
+                            0.50 if cover <= reserve_cover + 10 else 0.75)
+                        surplus_share = max(1, int(available[i] * share))
+                        recent_production = max(0, recent_specialty_production or 0)
+                        # Recent output permits ordinary gifts; accumulated stock above
+                        # a 15-tick comfort level adds a share-scaled stockpile allowance.
+                        comfort_stock = upkeep[i] * 15
+                        stockpile = max(0, inventory[i] - comfort_stock - committed[i])
+                        gift_budget = recent_production + int(stockpile * share)
+                        give[i] = min(available[i], surplus_share, gift_budget)
+                    else:
+                        give[i] = min(policy.gift_size, available[i])
+                    if not give[i]:
+                        continue
                     actions.append(Action('offer', (ad.station_id, tuple(give), (0, 0, 0), s.tick + ttl),
                                           f'Offer {give[i]} surplus {NAMES[i]} to {ad.station_id}, which advertises a need.',
                                           ('offer', ad.station_id)))

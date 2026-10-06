@@ -35,6 +35,86 @@ candidate per update and do not simulate execution or future inventory.
 
 ## Initial policy
 
+The existing policy remains the default. To use the separate, more generous
+variant, start with `--generous-policy`:
+
+```sh
+python client/run_live.py --automate --generous-policy
+```
+
+This profile keeps five ticks of specialty upkeep and thirty ticks of each
+imported resource, permits up to five units of payment in an exchange, and
+advertises only the specialty as a product. Its specialty gifts are dynamic:
+the client samples reported production once per tick, keeps the latest five
+samples, and caps each gift by a share of available surplus and a production
+budget. The share is 25% up to eight ticks of specialty stock, 50% up to
+fifteen ticks, and 75% above that. To account for accumulated specialty,
+stock above a fifteen-tick comfort level adds to the recent-production gift
+budget at that same share. Available surplus is stock above the specialty
+reserve and existing outgoing commitments. Gifts stop if stock is below any
+resource reserve. If recent production is zero, only a stockpile above the
+fifteen-tick comfort level can fund a gift. The gift-size option remains a
+switch: zero disables gifts; any positive value enables them in this profile.
+Explicit reserve and trade CLI options override the profile defaults.
+
+The two October 5 histories informed the change. In the run using a five-tick
+imported reserve, P02 (components specialty) ended with 406 components and no
+water or food, after failing around tick 110. The run with a fifteen-tick
+imported reserve and five-unit gifts ended with 328 food and no water or
+components, failing around tick 58. Both runs show that increasing gifts alone
+does not solve shortages in imported resources; the new profile protects a
+larger imported stock and directs sales and gifts toward the production
+specialty. These two runs are observations, not a guarantee that thirty ticks
+is optimal. The dynamic gift share is a starting heuristic and should be
+reviewed against later run histories.
+
+## Fast policy for one-second ticks
+
+The separate `--fast-policy` profile is intended for the nine-planet,
+one-second-tick trial. It protects three upkeep ticks for each resource, starts
+seeking imported resources at eight ticks, permits five-unit exchanges, makes
+no automatic gifts, advertises only its production specialty, and uses offer
+lifetimes of up to four ticks (subject to server caps). It evaluates the current
+authoritative snapshot immediately on each update; it does not poll or sleep
+between ticks. The executor still sends one command at a time and waits for
+the result and next state, so actual action throughput depends on server update
+and response latency.
+
+Put the nine assigned tokens in the project `.env` using these independent
+names; do not replace `BAZAAR_TOKEN`:
+
+```dotenv
+BAZAAR_FAST_TOKEN_1=token_for_client_1
+BAZAAR_FAST_TOKEN_2=token_for_client_2
+BAZAAR_FAST_TOKEN_3=token_for_client_3
+BAZAAR_FAST_TOKEN_4=token_for_client_4
+BAZAAR_FAST_TOKEN_5=token_for_client_5
+BAZAAR_FAST_TOKEN_6=token_for_client_6
+BAZAAR_FAST_TOKEN_7=token_for_client_7
+BAZAAR_FAST_TOKEN_8=token_for_client_8
+BAZAAR_FAST_TOKEN_9=token_for_client_9
+```
+
+Start nine independent processes and use each slot once:
+
+```sh
+python client/run_live.py --automate --fast-policy --fast-policy-key 1
+python client/run_live.py --automate --fast-policy --fast-policy-key 2
+python client/run_live.py --automate --fast-policy --fast-policy-key 3
+python client/run_live.py --automate --fast-policy --fast-policy-key 4
+python client/run_live.py --automate --fast-policy --fast-policy-key 5
+python client/run_live.py --automate --fast-policy --fast-policy-key 6
+python client/run_live.py --automate --fast-policy --fast-policy-key 7
+python client/run_live.py --automate --fast-policy --fast-policy-key 8
+python client/run_live.py --automate --fast-policy --fast-policy-key 9
+```
+
+Each process writes its own run history. A single generous-policy run remains
+`python client/run_live.py --automate --generous-policy`; it continues using
+`BAZAAR_TOKEN` and does not read or alter any fast-policy slot.
+
+
+
 - Identify our production resource from `self.specialty`. Retain three ticks
   of its reported upkeep and five ticks of upkeep for each other resource.
   Start seeking imported resources when they fall below that larger target.
@@ -68,6 +148,8 @@ Examples of policy configuration:
 ```sh
 python client/run_live.py --automate --reserve-ticks 3 --imported-reserve-ticks 5 --trade-size 1 --gift-size 1
 python client/run_live.py --automate --gift-size 0
+python client/run_live.py --automate --reserve-ticks 5 --imported-reserve-ticks 30 --trade-size 3 --gift-size 5
+
 ```
 
 `--reserve-ticks`, `--imported-reserve-ticks`, `--emergency-ticks`, and
@@ -78,6 +160,9 @@ outgoing gifts. The trade-size cap applies to total units paid when accepting
 an incoming offer and the units paid in a proposed exchange. Free incoming
 gifts are not subject to that payment cap. These settings apply to advisory
 and automated modes, not manual trades.
+
+up the amount of reserve ticks and horde things we don't produce, give everything we produce away
+only advertise product you produce
 
 ## Execution behavior
 

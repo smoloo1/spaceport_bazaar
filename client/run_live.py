@@ -25,6 +25,17 @@ def load_live_token(env_file):
     return token.strip()
 
 
+def load_fast_policy_token(env_file, slot):
+    """Load one isolated fast-policy credential slot from the selected env file."""
+    key = f"BAZAAR_FAST_TOKEN_{slot}"
+    token = os.environ.get(key)
+    if token is None:
+        token = dotenv_values(env_file, interpolate=False).get(key)
+    if not token or not token.strip():
+        raise ValueError(f"Set {key} in the project .env file or environment.")
+    return token.strip()
+
+
 async def observe(client, declare_ready=False):
     pending_ready = None
     first_state = True
@@ -66,15 +77,21 @@ async def main():
     modes.add_argument("--interactive", action="store_true", help="enable manual trading commands")
     modes.add_argument("--automate", action="store_true", help="automatically trade for survival and cooperation")
     modes.add_argument("--advisory", action="store_true", help="explain strategy recommendations without sending messages")
-    parser.add_argument("--reserve-ticks", type=int, default=3, help="upkeep reserve for our production specialty (default: 3)")
-    parser.add_argument("--imported-reserve-ticks", type=int, default=5,
-                        help="upkeep reserve for resources we do not produce (default: 5)")
+    parser.add_argument("--generous-policy", action="store_true",
+                        help="use the separate generous policy: 5 specialty reserve ticks, 30 imported reserve ticks, 5-unit trades, production-aware gifts, specialty-only sales")
+    parser.add_argument("--fast-policy", action="store_true",
+                        help="use the separate fast policy profile for one-second-tick games")
+    parser.add_argument("--fast-policy-key", type=int, choices=range(1, 10), metavar="1..9",
+                        help="select BAZAAR_FAST_TOKEN_1 through BAZAAR_FAST_TOKEN_9 (requires --fast-policy)")
+    parser.add_argument("--reserve-ticks", type=int, help="upkeep reserve for our production specialty")
+    parser.add_argument("--imported-reserve-ticks", type=int,
+                        help="upkeep reserve for resources we do not produce")
     parser.add_argument("--imported-seek-ticks", type=int,
                         help="start seeking imported resources at this horizon (default: same as reserve)")
-    parser.add_argument("--trade-size", type=int, default=2, help="maximum units paid per automated trade (default: 2)")
-    parser.add_argument("--gift-size", type=int, default=1, help="maximum units in an outgoing gift; 0 disables gifts")
-    parser.add_argument("--emergency-ticks", type=int, default=1,
-                        help="allow up to 2:1 when stock covers fewer than this many upkeep ticks (default: 1)")
+    parser.add_argument("--trade-size", type=int, help="maximum units paid per automated trade")
+    parser.add_argument("--gift-size", type=int, help="maximum units in an outgoing gift; 0 disables gifts")
+    parser.add_argument("--emergency-ticks", type=int,
+                        help="allow up to 2:1 when stock covers fewer than this many upkeep ticks")
     parser.add_argument("--practice", action="store_true",
                         help="use the local practice server and its P01 credentials instead of .env")
     parser.add_argument("--credentials", type=Path,
@@ -95,11 +112,31 @@ async def main():
         parser.error("The supplied practice server requires its fixed script. Use run_exercise.py or the strategy tests to validate locally.")
     if args.advisory and args.ready:
         parser.error("--advisory sends no messages; omit --ready")
+    if args.generous_policy and args.fast_policy:
+        parser.error("--generous-policy and --fast-policy are separate profiles; choose one")
+    if args.fast_policy_key is not None and not args.fast_policy:
+        parser.error("--fast-policy-key requires --fast-policy")
+    if args.fast_policy and args.fast_policy_key is None:
+        parser.error("--fast-policy requires --fast-policy-key so each instance uses its own credential")
+    if args.fast_policy and not args.automate:
+        parser.error("--fast-policy requires --automate")
     from strategy import Policy
     try:
-        policy = Policy(reserve_ticks=args.reserve_ticks, imported_reserve_ticks=args.imported_reserve_ticks,
-                        trade_size=args.trade_size, gift_size=args.gift_size, emergency_ticks=args.emergency_ticks,
-                        imported_seek_ticks=args.imported_seek_ticks)
+        defaults = ({"reserve_ticks": 5, "imported_reserve_ticks": 30, "trade_size": 5,
+                     "gift_size": 5, "emergency_ticks": 1, "dynamic_gifts": True,
+                     "advertise_specialty_only": True} if args.generous_policy else
+                    {"reserve_ticks": 3, "imported_reserve_ticks": 3,
+                     "imported_seek_ticks": 8, "trade_size": 5, "gift_size": 0,
+                     "emergency_ticks": 1, "ttl": 4, "offer_ttl": 4,
+                     "advertise_specialty_only": True} if args.fast_policy else {})
+        for name, value in (("reserve_ticks", args.reserve_ticks),
+                            ("imported_reserve_ticks", args.imported_reserve_ticks),
+                            ("trade_size", args.trade_size), ("gift_size", args.gift_size),
+                            ("emergency_ticks", args.emergency_ticks),
+                            ("imported_seek_ticks", args.imported_seek_ticks)):
+            if value is not None:
+                defaults[name] = value
+        policy = Policy(**defaults)
     except ValueError as exc:
         parser.error(str(exc))
     url = args.url or (bazaar.PRACTICE_URL if args.practice else bazaar.DEFAULT_URL)
@@ -108,7 +145,8 @@ async def main():
             credentials = args.credentials or Path(__file__).resolve().parents[1] / "run/validation-credentials.json"
             token = bazaar.load_token(credentials)
         else:
-            token = load_live_token(args.env_file)
+            token = (load_fast_policy_token(args.env_file, args.fast_policy_key)
+                     if args.fast_policy else load_live_token(args.env_file))
     except (ValueError, OSError, LookupError) as exc:
         parser.error(str(exc))
 
@@ -123,7 +161,9 @@ async def main():
     try:
         journal.record('session_start', mode='automated' if args.automate else
                        'advisory' if args.advisory else 'manual' if args.interactive else 'observe',
-                       practice=args.practice)
+                       practice=args.practice,
+                       policy='fast' if args.fast_policy else 'generous' if args.generous_policy else 'default',
+                       fast_policy_key_slot=args.fast_policy_key)
         async with bazaar.BazaarClient(url, token, verbose=args.verbose, journal=journal) as client:
             if args.automate or args.advisory:
                 from automated import run_automated

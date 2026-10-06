@@ -22,6 +22,12 @@ BAZAAR_TOKEN=your_client_token
 An exported `BAZAAR_TOKEN` takes precedence over `.env`. The separate observatory
 token is not used by this client.
 
+For the nine-client fast-policy run, add the nine assigned client tokens as
+`BAZAAR_FAST_TOKEN_1` through `BAZAAR_FAST_TOKEN_9` in the same Git-ignored
+`.env` file. Keep `BAZAAR_TOKEN` as-is: ordinary and `--generous-policy`
+launches continue to use it. Each fast-policy process must select a different
+slot with `--fast-policy-key`.
+
 Check the live connection, then stop with Ctrl+C:
 
 ```sh
@@ -32,6 +38,21 @@ A received state confirms connection and decoding. Start automated trading:
 
 ```sh
 python client/run_live.py --automate
+```
+
+Run one fast-policy instance with a selected credential slot:
+
+```sh
+python client/run_live.py --automate --fast-policy --fast-policy-key 1
+```
+
+Launch nine separate terminals/processes, using slots 1 through 9 once each.
+`--fast-policy` cannot be combined with `--generous-policy`. To run the
+generous policy later, use its ordinary command and it will still read only
+`BAZAAR_TOKEN`:
+
+```sh
+python client/run_live.py --automate --generous-policy
 ```
 
 This connects to `wss://spaceport.edneo.com/ws`, declares readiness, and waits

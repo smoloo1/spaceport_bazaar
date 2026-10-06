@@ -1,5 +1,6 @@
 """Execute cooperative decisions one at a time using authoritative snapshots."""
 import uuid
+from collections import deque
 from dataclasses import asdict
 
 import bazaar
@@ -22,6 +23,8 @@ class AutomatedSession:
         self.attempted = set()
         self.cooldown_until = 0
         self.capacity_exhausted = False
+        self.production_samples = deque(maxlen=5)
+        self.production_sample_tick = None
         self.client.record('policy', mode='advisory' if advisory else 'automated', settings=asdict(policy))
 
     def record_decision(self, reason, action=None, request_id=None):
@@ -39,6 +42,12 @@ class AutomatedSession:
             if self.state is not None and s.run_id != self.state.run_id:
                 raise bazaar.ProtocolViolation('Run changed; reconnect before continuing automation.')
             self.state = s
+            if s.tick != self.production_sample_tick:
+                self.production_samples.append(getattr(
+                    s.self.last_production,
+                    {pb.RESOURCE_WATER: 'water', pb.RESOURCE_FOOD: 'food',
+                     pb.RESOURCE_COMPONENTS: 'components'}[s.self.specialty]))
+                self.production_sample_tick = s.tick
             if s.tick != self.tick:
                 self.tick = s.tick
                 self.commands_this_tick.clear()
@@ -88,7 +97,7 @@ class AutomatedSession:
         s = self.state
         if s is None:
             return
-        actions = candidates(s, self.policy)
+        actions = candidates(s, self.policy, sum(self.production_samples))
         if self.advisory:
             action = next((a for a in actions if a.key not in self.attempted), None)
             if action:

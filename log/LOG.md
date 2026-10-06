@@ -80,12 +80,4 @@ Add `--hard` to the demo game to watch the planet fail. Restart the demo game to
 
 Set `NO_COLOR=1` to turn off colors. On consoles that can't show symbols like ★ or █, it switches to plain ASCII.
 
-### Limitations
-- The Expansions below are not built yet.
-- Tested on the local practice server's 10-step exchange, the automated-mode local check, and full 60-tick simulated games (including a reconnect and a stall). It has not been run against a real live game yet.
-
 > Codex wrote the first version of `scripts/live-run-log.py` and edited `client/run_live.py`, based on this spec. Claude fixed its bugs and rebuilt it as the interactive dashboard.
-
-## Expansions
-- An interactive HTML site for browsing past logs, with graphs comparing performance across runs.
-- The same report for local practice-server runs, once a practice server that supports this is available.
